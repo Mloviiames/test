@@ -1,9 +1,12 @@
-package 课设;
+package tom.jiafei;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.image.BufferedImage;
+import java.io.*;
+import java.security.MessageDigest;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -49,6 +52,7 @@ public class SokobanGame extends JFrame {
     private int[][] currentMap;
     private Point playerPos = new Point();
     private int boxesLeft = 0;
+    private String currentUser;
 
     // 资源缓存
     private Map<TileType, Image> tileImages = new HashMap<>();
@@ -63,14 +67,15 @@ public class SokobanGame extends JFrame {
     private JButton prevLevelButton;
     private JButton nextLevelButton;
 
-    public SokobanGame() {
+    public SokobanGame(String username) {
+        this.currentUser = username;
         initUI();
         loadResources();
         loadLevel(currentLevel);
     }
 
     private void initUI() {
-        setTitle("增强版推箱子游戏");
+        setTitle("增强版推箱子游戏 - 用户: " + currentUser);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
 
@@ -122,6 +127,24 @@ public class SokobanGame extends JFrame {
         infoPanel.add(nextLevelButton);
 
         add(infoPanel, BorderLayout.SOUTH);
+
+        // 菜单栏
+        JMenuBar menuBar = new JMenuBar();
+
+        JMenu gameMenu = new JMenu("游戏");
+        menuBar.add(gameMenu);
+
+        JMenu userMenu = new JMenu("用户");
+        JMenuItem historyItem = new JMenuItem("历史记录");
+        historyItem.addActionListener(e -> showHistory());
+        userMenu.add(historyItem);
+
+        JMenuItem logoutItem = new JMenuItem("注销");
+        logoutItem.addActionListener(e -> logout());
+        userMenu.add(logoutItem);
+        menuBar.add(userMenu);
+
+        setJMenuBar(menuBar);
 
         setSize(800, 600);
         setLocationRelativeTo(null);
@@ -215,7 +238,7 @@ public class SokobanGame extends JFrame {
                         {1, 0, 0, 0, 0, 0, 0, 1},
                         {1, 1, 1, 1, 1, 1, 1, 1}
                 },
-                // 第三关（新增）
+                // 第三关
                 {
                         {1, 1, 1, 1, 1, 1, 1, 1, 1},
                         {1, 0, 0, 0, 0, 0, 0, 0, 1},
@@ -418,6 +441,7 @@ public class SokobanGame extends JFrame {
     }
 
     private void showWinMessage() {
+        saveGameRecord();
         String message = "恭喜过关！\n步数: " + moveCount;
         if (currentLevel < getLevelCount() - 1) {
             message += "\n是否进入下一关？";
@@ -432,10 +456,205 @@ public class SokobanGame extends JFrame {
         }
     }
 
+    private void saveGameRecord() {
+        try (PrintWriter pw = new PrintWriter(new FileWriter("records.dat", true))) {
+            pw.printf("%s|%d|%d|%d%n",
+                    currentUser, currentLevel, moveCount, System.currentTimeMillis());
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void showHistory() {
+        StringBuilder records = new StringBuilder();
+        try (BufferedReader br = new BufferedReader(new FileReader("records.dat"))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split("\\|");
+                if (parts[0].equals(currentUser)) {
+                    records.append(String.format("关卡 %d: %d 步 (%s)%n",
+                            Integer.parseInt(parts[1]) + 1,
+                            Integer.parseInt(parts[2]),
+                            new Date(Long.parseLong(parts[3])).toString()));
+                }
+            }
+        } catch (IOException e) {
+            records.append("暂无历史记录");
+        }
+
+        JTextArea textArea = new JTextArea(records.toString());
+        textArea.setEditable(false);
+        JScrollPane scrollPane = new JScrollPane(textArea);
+        scrollPane.setPreferredSize(new Dimension(400, 300));
+        JOptionPane.showMessageDialog(this, scrollPane,
+                currentUser + "的游戏记录", JOptionPane.PLAIN_MESSAGE);
+    }
+
+    private void logout() {
+        dispose();
+        new LoginDialog().setVisible(true);
+    }
+
+    private static class LoginDialog extends JDialog {
+        public LoginDialog() {
+            super((JFrame)null, "用户登录", true);
+            setSize(350, 250);
+            setLocationRelativeTo(null);
+            setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+            initUI();
+        }
+
+        private void initUI() {
+            JTabbedPane tabbedPane = new JTabbedPane();
+            tabbedPane.addTab("登录", createLoginPanel());
+            tabbedPane.addTab("注册", createRegisterPanel());
+            add(tabbedPane);
+        }
+
+        private JPanel createLoginPanel() {
+            JPanel panel = new JPanel(new BorderLayout(10, 10));
+            panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+            JPanel inputPanel = new JPanel(new GridLayout(2, 2, 5, 5));
+            JTextField usernameField = new JTextField();
+            JPasswordField passwordField = new JPasswordField();
+
+            inputPanel.add(new JLabel("用户名:"));
+            inputPanel.add(usernameField);
+            inputPanel.add(new JLabel("密码:"));
+            inputPanel.add(passwordField);
+            panel.add(inputPanel, BorderLayout.CENTER);
+
+            JButton loginBtn = new JButton("登录");
+            loginBtn.addActionListener(e -> {
+                String username = usernameField.getText().trim();
+                String password = new String(passwordField.getPassword());
+
+                if (username.isEmpty() || password.isEmpty()) {
+                    JOptionPane.showMessageDialog(this, "用户名和密码不能为空");
+                    return;
+                }
+
+                if (checkLogin(username, password)) {
+                    dispose();
+                    new SokobanGame(username).setVisible(true);
+                } else {
+                    JOptionPane.showMessageDialog(this, "用户名或密码错误");
+                }
+            });
+
+            JPanel btnPanel = new JPanel();
+            btnPanel.add(loginBtn);
+            panel.add(btnPanel, BorderLayout.SOUTH);
+
+            return panel;
+        }
+
+        private JPanel createRegisterPanel() {
+            JPanel panel = new JPanel(new BorderLayout(10, 10));
+            panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+            JPanel inputPanel = new JPanel(new GridLayout(3, 2, 5, 5));
+            JTextField usernameField = new JTextField();
+            JPasswordField passwordField = new JPasswordField();
+            JPasswordField confirmField = new JPasswordField();
+
+            inputPanel.add(new JLabel("用户名:"));
+            inputPanel.add(usernameField);
+            inputPanel.add(new JLabel("密码:"));
+            inputPanel.add(passwordField);
+            inputPanel.add(new JLabel("确认密码:"));
+            inputPanel.add(confirmField);
+            panel.add(inputPanel, BorderLayout.CENTER);
+
+            JButton registerBtn = new JButton("注册");
+            registerBtn.addActionListener(e -> {
+                String username = usernameField.getText().trim();
+                String password = new String(passwordField.getPassword());
+                String confirm = new String(confirmField.getPassword());
+
+                if (username.isEmpty() || password.isEmpty()) {
+                    JOptionPane.showMessageDialog(this, "用户名和密码不能为空");
+                    return;
+                }
+
+                if (!password.equals(confirm)) {
+                    JOptionPane.showMessageDialog(this, "两次输入的密码不一致");
+                    return;
+                }
+
+                if (registerUser(username, password)) {
+                    JOptionPane.showMessageDialog(this, "注册成功，请登录");
+                    usernameField.setText("");
+                    passwordField.setText("");
+                    confirmField.setText("");
+                } else {
+                    JOptionPane.showMessageDialog(this, "用户名已存在");
+                }
+            });
+
+            JPanel btnPanel = new JPanel();
+            btnPanel.add(registerBtn);
+            panel.add(btnPanel, BorderLayout.SOUTH);
+
+            return panel;
+        }
+
+        private boolean checkLogin(String username, String password) {
+            try (BufferedReader br = new BufferedReader(new FileReader("users.dat"))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    String[] parts = line.split(":");
+                    if (parts[0].equals(username) && parts[1].equals(hashPassword(password))) {
+                        return true;
+                    }
+                }
+            } catch (IOException e) {
+                return false;
+            }
+            return false;
+        }
+
+        private boolean registerUser(String username, String password) {
+            // 检查用户是否存在
+            try (BufferedReader br = new BufferedReader(new FileReader("users.dat"))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    if (line.startsWith(username + ":")) {
+                        return false;
+                    }
+                }
+            } catch (IOException e) {
+                // 文件不存在，继续注册
+            }
+
+            // 注册新用户
+            try (PrintWriter pw = new PrintWriter(new FileWriter("users.dat", true))) {
+                pw.println(username + ":" + hashPassword(password));
+                return true;
+            } catch (IOException e) {
+                return false;
+            }
+        }
+
+        private String hashPassword(String password) {
+            try {
+                MessageDigest md = MessageDigest.getInstance("SHA-256");
+                byte[] hash = md.digest(password.getBytes());
+                StringBuilder sb = new StringBuilder();
+                for (byte b : hash) {
+                    sb.append(String.format("%02x", b));
+                }
+                return sb.toString();
+            } catch (Exception e) {
+                throw new RuntimeException("密码加密失败", e);
+            }
+        }
+    }
+
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
-            SokobanGame game = new SokobanGame();
-            game.setVisible(true);
+            new LoginDialog().setVisible(true);
         });
     }
 }
